@@ -1,0 +1,891 @@
+#!/usr/bin/perl
+ 
+# Autor: Christian Oechler
+# Erstellungsdatum: 03.03.2005
+# Änderungsdatum: 16.04.2005
+# Version 0.0.1
+# Copyright: 2005 Christian Oechler
+# Lizenz: GPL Version 2
+
+# Bindet das benötigte Modul für den Datenbankzugriff ein
+use DBI;
+
+# Bindet das benötigte Modul zur Erzeugung der Benutzeroberfläche ein
+use Tk; 
+
+# Bindet das benötigte Modul zum Nutzen von switch-Anweisungen
+use Switch qw(fallthrough);
+
+# Bindet das benötigte Modul für den Chipkartezugriff ein
+use Chipcard::CTAPI;
+
+# Erstellt ein Chipkarten Objekt
+$card = new Chipcard::CTAPI('interface' => &Chipcard::CTAPI::PORT_COM1);
+    
+# Setzt die Werte für die Verbindung zur Datenbank
+$dbhost = "localhost";
+$dbuser = "";
+$dbpassword = "";
+
+# Setzt die Startwerte für die Programmverwaltung
+$mode = "";
+$user = "";
+$age = "";
+$assets = "";
+$language{selected} = "";
+$category{selected} = "";
+$cocktail{selected} = "";
+$transaction{selected} = "";
+
+
+# Setzt die Farben für die Bedienoberfläche
+$color{background} = "#FFFFFF";
+$color{selected} = "#971D1D";
+$color{item} = "#1B5F8F";
+$color{itemfont} = "#FFFFFF";
+$color{normalfont} = "#000000";
+
+
+# Funktion liest die Programmmeldung mit der angegebenen ID in der richtigen Sprache aus
+sub get_message
+   {
+    # Stellt eine Verbindung zur Datenbank her
+    my $conid = DBI->connect("DBI:mysql:frontend:$dbhost",$dbuser,$dbpassword);
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der gewünschten Programmmeldung
+    my $query = $conid -> prepare("SELECT message_text FROM messages WHERE message_id = '$_[0]' AND message_language = '$_[1]';");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage er gewünschten Programmmeldung aus
+    $query -> execute();
+    
+    # Liest die geünschte Programmmeldung aus
+    my $row = $query -> fetchrow_hashref();
+    
+    # Gibt die gewünschte Programmmeldung zurück
+    return $row->{message_text};
+    
+    # Schließt die Verbindung zur Datenbank
+    $conid -> disconnect();
+   }
+
+
+# Funktion zeigt Zusatzinfos zur selektierten Kategorie bzw. zum selektierten Cocktail an
+sub display_infos
+   {
+    # Stellt eine Verbindung zur Datenbank her
+    my $conid = DBI->connect("DBI:mysql:mixer:$dbhost",$dbuser,$dbpassword);
+    
+    # Fallt tritt ein, wenn die Zusatzinformationen für einen Cocktail abgerufen werden sollen 
+    if ($mode eq "category")
+       {
+        # Erzeugt eine SELECT-Anweisung zur Abfrage der Beschreibung der selektierten Kategorie
+	my $query1 = $conid -> prepare("SELECT category_description FROM categories WHERE category_id = '$item{id}{$item{label}{selected}}';");
+	
+	# Führt die erzeuge SELECT-Anweisung zur Abfrage der Beschreibung der selektierten Kategorie
+	$query1 -> execute();
+	
+	# Liest die Beschreibung der selektierten Kategorie aus
+	my $row1 = $query1 -> fetchrow_hashref();
+	
+	# Zeigt die Beschreibung der selektierten Kategorie an
+	$category{canvas}->itemconfigure(2, -text =>$row1->{category_description});
+		
+	# Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage der Beschreibung der selektierten Kategorie frei
+	$query1 -> finish();
+       }
+
+    # Fallt tritt ein, wenn die Zusatzinformationen für einen Cocktail abgerufen werden sollen   
+    if ($mode eq "cocktail")
+       {
+        # Erzeugt eine SELECT-Anweisung zur Abfrage des Preises und des Mindesalters des selektierten Cocktails
+	my $query1 = $conid -> prepare("SELECT cocktails.cocktail_price AS cocktail_price, IFNULL(max(liquids.liquid_minage),'0') AS cocktail_minage FROM cocktails LEFT JOIN recipes ON cocktails.cocktail_id = recipes.cocktail_id LEFT JOIN liquids ON recipes.liquid_id = liquids.liquid_id WHERE cocktails.cocktail_id = '$item{id}{$item{label}{selected}}' GROUP BY cocktails.cocktail_id;");
+	
+	# Erzeugt eine SELECT-Anweisung zur Abfrage der Zutatenliste des selektierten Cocktails
+	my $query2 = $conid -> prepare("SELECT recipes.liquid_amount AS liquid_amount, liquids.liquid_name AS liquid_name FROM cocktails LEFT JOIN recipes ON cocktails.cocktail_id = recipes.cocktail_id LEFT JOIN liquids ON recipes.liquid_id = liquids.liquid_id WHERE cocktails.cocktail_id = '$item{id}{$item{label}{selected}}';");
+	
+	# Führt die erzeuge SELECT-Anweisung zur Abfrage des Preises und des Mindesalters des selektierten Cocktails
+	$query1 -> execute();
+	
+	# Führt die erzeuge SELECT-Anweisung zur Abfrage des Zutatenliste des selektierten Cocktails
+	$query2 -> execute();
+	
+	# Liest den Preis und das Mindesalt des selektierten Cocktails aus
+	my $row1 = $query1 -> fetchrow_hashref();
+	
+	# Deklariert die Variable als privat
+	my $string;
+	
+	# Liest die Zutatenliste des selektierten Cocktails aus
+	while (my $row2 = $query2 -> fetchrow_hashref())
+	   {
+	    $string .= $row2->{liquid_amount}." ml\t".$row2->{liquid_name}."\n";
+	   }
+	
+	# Zeigt die Zutatenliste des selektierten Cocktails an
+	$cocktail{canvas}->itemconfigure(4, -text => $string);
+	
+	# Zeigt das benötigte Mindesalter des selektierten Cocktails an
+	$cocktail{canvas}->itemconfigure(5, -text => $row1->{cocktail_minage}." ".get_message(14,$language{selected}));
+	
+	# Zeigt den Preis des selektierten Cocktails an
+	$cocktail{canvas}->itemconfigure(6, -text => $row1->{cocktail_price}." Euro");
+	
+	# Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des Preises und des Mindesalters des selektierten Cocktails frei
+	$query1 -> finish();
+	
+	# Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des Zutatenliste des selektierten Cocktails  frei
+	$query2 -> finish();
+       }
+
+    # Schließt die Verbindung zur Datenbank
+    $conid -> disconnect();
+   }
+   
+
+# Funktion selektiert die gewünschte Kategorie bzw. den gewünschten Cocktail
+sub select_items
+   {
+    # Löscht die Selektierung bei den Anzeigen der Kategorie bzw. der Cocktails
+    for (my $i = $item{count}{min};$i <= $item{count}{max}; $i++){$item{label}{$i} -> configure(-background => $color{item});}
+    
+    # Wählt aus, welche Operation bei welchen Tastendruck ausgeführt werden soll
+    switch :
+       {
+        # Fall tritt ein, wenn der Benutzer die Pfeiltaste nach oben gedrückt hat
+        if ($_[0] eq "up")
+	   {
+	    # Überprüft, ob die Bewegung der Selektierung nicht einen ungültigen Index der Anzeigen erzeugt
+	    if ($item{label}{selected} - 2 >= 1)
+	       {
+	        # Überprüft, ob die Bewegung der Selektierung einen kleineren Indexwert der Anzeigen als der minimale der Seite erzeugt
+	        if ($item{label}{selected} - 2 >= $item{count}{min})
+		   {
+		    # Erniedrigt den Indexwert der Selektierung
+		    $item{label}{selected} = $item{label}{selected} - 2;
+		    
+		    # Selektiert die neue Anzeige mit dem neuen Indexwert
+		    $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+		   }
+	       }
+	    else
+	       {
+	        $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+	       }
+	   }
+	   
+	# Fall tritt ein, wenn der Benutzer die Pfeiltaste nach unten gedrückt hat
+        if ($_[0] eq "down")
+	   {
+	    if ($item{label}{selected} + 2 <= $item{count}{query})
+	       {
+	        # Überprüft, ob die Bewegung der Selektierung einen größeren Indexwert der Anzeigen als der maximale der Seite erzeugt
+	        if ($item{label}{selected} + 2 <= $item{count}{max})
+		   {
+		    # Erhöht den Indexwert der Selektierung
+		    $item{label}{selected} = $item{label}{selected} + 2;
+		    
+		    # Selektiert die neue Anzeige mit dem neuen Indexwert
+		    $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+		   }
+	       }
+	    else
+	       {
+	        $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+	       }
+	   }
+	   
+	# Fall tritt ein, wenn der Benutzer die Pfeiltaste nach links gedrückt hat
+        if ($_[0] eq "left")
+	   {
+	    # Überprüft, ob die Bewegung der Selektierung nicht einen ungültigen Index der Anzeigen erzeugt
+	    if ($item{label}{selected} - 1 >= 1)
+	       {
+	        # Überprüft, ob die Bewegung der Selektierung einen kleineren Indexwert der Anzeigen als der minimale der Seite erzeugt
+	        if ($item{label}{selected} - 1 >= $item{count}{min})
+		   {
+		    # Erniederigt den Indexwert der Selektierung
+		    $item{label}{selected} = $item{label}{selected} - 1;
+		    
+		    # Selektiert die neue Anzeige mit dem neuen Indexwert
+		    $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+		   }
+	       }
+	    else
+	       {
+	        $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+	       }
+	   }
+	   
+	# Fall tritt ein, wenn der Benutzer die Pfeiltaste nach rechts gedrückt hat
+        if ($_[0] eq "right")
+	   {
+	    if ($item{label}{selected} + 1 <= $item{count}{query})
+	       {
+	        # Überprüft, ob die Bewegung der Selektierung einen größeren Indexwert der Anzeigen als der maximale der Seite erzeugt
+	        if ($item{label}{selected} + 1 <= $item{count}{max})
+		   {
+		    # Erhöht den Indexwert der Selektierung
+		    $item{label}{selected} = $item{label}{selected} + 1;
+		    
+		    # Selektiert die neue Anzeige mit dem neuen Indexwert
+		    $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+		   }
+	       }
+	    else
+	       {
+	        $item{label}{$item{label}{selected}} -> configure(-background => $color{selected});
+	       }
+	   }
+       }
+       
+    # Zeigt Zusatzinformationen zur selektierten Kategorie bzw. des selektierten Cocktails an
+    display_infos();
+   }
+
+
+# Funktion überprüft, ob das die ganze Sache abgeschlossen ist und der Benutzer seine Chipkarte entfernt hat
+sub check_final
+   {
+    # Resetet die Chipkarte
+    $card->reset;
+    
+    # Überprüft, ob die Chipkarte herausgezogen wurde
+    if ($card->cardInserted() eq 0)
+       {
+        # Erzeugt den Frame zur Anzeige des Startbildschirms
+	$chipcard{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+	
+	# Erstellt einen neuen Timer
+	$chipcard{timer} = $chipcard{frame}->repeat(1000,sub{check_chipcard();});
+	
+	$infodisplay->configure(-text => get_message(1,"german"));
+        
+	# Zerstört den Frame zur Anzeige des Startbildschirms
+	$final{frame}->destroy();
+       }
+   }
+
+# Funktion überprüft, ob eine Chipkarte eingelegt worden ist
+sub check_chipcard
+   {
+    # Resetet die Chipkarte
+    $card->reset;
+    
+    # Überprüft, ob die Chipkarte eingesteckt wurde
+    if ($card->cardInserted() eq 1)
+       {
+	# Liest die Benutzer-ID von der Chipkarte
+	$card->read(1,5);
+	
+	# Schreibt die Benutzer-ID in die entsprechende Variable
+	$user = $card->getData();
+	
+	# Stellt eine Verbindung zur Datenbank her
+	my $conid = DBI->connect("DBI:mysql:commerce:$dbhost",$dbuser,$dbpassword);
+	
+	# Erzeugt eine SELECT-Anweisung zur Abfrage, ob der Benutzer der auf der Chipkarte gespeichert ist auch in der Datenbank vorhanden ist
+	my $query1 = $conid -> prepare("SELECT IF(COUNT(user_id) = 1,'yes','no') known FROM users WHERE user_id = '$user';");
+	
+	# Führt due erzeugte SELECT-Anweisung zur Abfrage, ob der Benutzer der auf der Chipkarte gespeichert ist auch in der Datenbank vorhanden ist aus
+	$query1 -> execute();
+	
+	# Liest aus, ob der Benutzer in der Datebank existiert
+	my $row1 = $query1 -> fetchrow_hashref();
+	
+	# Überprüft, ob der Benutzer in der Datenbank vorhanden ist
+	if ($row1->{known} eq "yes")
+	   {
+	    # Erzeugt eine SELECT-Anweisung zur Abfrage des Alters und des Guthabens des Benutzers
+	    my $query2 = $conid -> prepare("SELECT YEAR(NOW()) - YEAR(users.user_birthday) - IF(DATE_FORMAT(NOW(),'%m.%d') >= DATE_FORMAT(users.user_birthday,'%m.%d'),0,1) AS user_age, sum(transaction_amount) as transaction_sum FROM users LEFT JOIN transactions ON users.user_id = transactions.user_id WHERE users.user_id = '$user' GROUP BY users.user_id LIMIT 1;");
+	    
+	    # Führt die erzeugte SELECT-Anweisung zur Abfrage des Alters und des Guthabens des Benutzers aus
+	    $query2 -> execute();
+	    
+	    # Liest das Alter und das Guthaben des Benutzers aus
+	    my $row2 = $query2 -> fetchrow_hashref();
+	    
+	    # Schreibt das Alter und das Guthaben des Benutzers in die entsprechende Variable
+	    $age = $row2->{user_age};
+	    $assets = $row2->{transaction_sum};
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage ob ein Benutzer vorhanden ist frei
+	    $query1 -> finish();
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage des Alters und des Guthabens des Benutzers frei
+	    $query2 -> finish();
+	    
+	    # Schließt die Verbindung zur Datenbank
+	    $conid -> disconnect();
+	    
+	    # Erstellt die Auswahl der Sprachen
+	    create_languageselection();
+	   }
+	else
+	   {
+	    # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage ob ein Benutzer vorhanden ist frei
+	    $query1 -> finish();
+	    
+	    # Schließt die Verbindung zur Datenbank
+	    $conid -> disconnect();
+	    
+	    $infodisplay->configure(-text => "Benutzer unbekannt! Bitte Karte entfernen!");
+	   }
+       }
+    else
+       {
+        $infodisplay->configure(-text => get_message(1,"german"));
+       }
+   }
+   
+
+# Funktion erzeugt die Auswahl von Sprache
+sub create_languageselection
+   {
+    # Zerstört den Frame zur Anzeige des Startbildschirms
+    $chipcard{frame}->destroy();
+    
+    # Zeigt dem Benutzer an, dass er seine gewünschte Sprache auswählen soll
+    $infodisplay->configure(-text => get_message(2,"german"));
+    
+    # Erzeugt den Frame zur Auswahl für die gewünschte Sprache
+    $language{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+    
+    # Setzt die Modusvariable auf 'category'
+    $mode = "language";
+    
+    # Erzeugt die Auswahlmöglichkeiten und packt diese in den richtigen Frame
+    $item{label}{1} = $language{frame}->Label(-background => $color{item}, -foreground => "#FFFFFF", -text => "Deutsch") -> place(-height => 100, -x => 95,-y => 150, -width => 100);
+    $item{label}{2} = $language{frame}->Label(-background => $color{item}, -foreground => "#FFFFFF", -text => "English") -> place(-height => 100, -x => 345,-y => 150, -width => 100);
+    
+    # Erzeugt die internen Werte der Auswahlmöglichkeiten
+    $item{id}{1} = "german";
+    $item{id}{2} = "english";
+    $item{name}{1} = "Deutsch";
+    $item{name}{2} = "English";
+    
+    $item{count}{min} = 1;
+    $item{count}{max} = 2;
+    $item{count}{query} = 2;
+    
+    # Selektiert das erste Anzeigefeld
+    $item{label}{1} -> configure(-background => $color{selected});
+    $item{label}{selected} = 1;
+   }
+
+
+# Funktion erzeugt die Auswahl von Kategorien
+sub create_categoryselection
+   {    
+    # Zerstört den Frame zur Auswahl der Kategorie
+    $language{frame}->destroy();
+    
+    # Setzt die Modusvariable auf 'category'
+    $mode = "category";
+    
+    # Zeigt dem Benutzer an, dass er eine Kategorie auswählen muss
+    $infodisplay->configure(-text => get_message(3,$language{selected}));
+    
+    # Erzeugt den Frame zur Auswahl der Kategorie
+    $category{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 640) -> place(-x => 0,-y => 0);
+    
+    # Erzeugt einen Rahmen für das Zusatzinfodisplay
+    $category{canvas} = $category{frame}->Canvas(-background => $color{background}, -relief => "solid", -borderwidth => 1) -> place(-height =>380, -x => 430, -y => 10, -width => 200);
+    
+    $category{canvas}->createText(10, 10, -anchor => "nw", -fill => "#000000", -text => get_message(10,$language{selected}));
+    $category{canvas}->createText(10, 30, -fill => "#000000", -text => "",-width => 180, -anchor => "nw");
+	
+    # Liest die Daten zu allen erlaubten Kategorien aus
+    read_itemdata();
+    
+    # Setzt die mininmale Anzahl der Anzeigen der Kategorien auf 1
+    $item{count}{min} = 1;
+    
+    # Ermittelt die maximale Anzahl der Anzeigen der Kategorien
+    if ($item{count}{query} < 20)
+       {
+        $item{count}{max} = $item{count}{query};
+       }
+    else
+       {
+        $item{count}{max} = 20;
+       }
+   
+    # Zeigt alle erlaubten Kategorien an
+    display_items();
+   }
+
+
+# Funktion erzeugt die Auswahl von Cocktails
+sub create_cocktailselection
+   {
+    # Zerstört den Frame zur Auswahl der Kategorie
+    $category{frame}->destroy();
+    
+    # Setzt die Modusvariable auf 'cocktail'
+    $mode = "cocktail";
+    
+    # Zeigt dem Benutzer an, dass er ein Cocktail auswählen muss
+    $infodisplay->configure(-text => get_message(4,$language{selected}));
+    
+    # Erzeugt den Frame zur Auswahl des Cocktails
+    $cocktail{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 640) -> place(-x => 0,-y => 0);
+    
+    # Erzeugt einen Rahmen für das Zusatzinfodisplay
+    $cocktail{canvas} = $cocktail{frame}->Canvas(-background => $color{background}, -relief => "solid", -borderwidth => 1) -> place(-height =>380, -x => 430, -y => 10, -width => 200);
+
+    # Erzeugt die Beschriftungen für die Zusatzinformatioenn (Zutatenliste, Mindesalter, Preis)
+    $cocktail{canvas}->createText(10, 10, -anchor => "nw", -fill => "#000000", -text => get_message(11,$language{selected}));
+    $cocktail{canvas}->createText(10, 125, -anchor => "nw", -fill => "#000000", -text => get_message(12,$language{selected}));
+    $cocktail{canvas}->createText(10, 160, -anchor => "nw", -fill => "#000000", -text => get_message(13,$language{selected}));
+
+    $cocktail{canvas}->createText(10,25, -anchor => "nw", -fill => "#000000");
+    $cocktail{canvas}->createText(10,140, -anchor => "nw", -fill => "#000000");
+    $cocktail{canvas}->createText(10,175, -anchor => "nw", -fill => "#000000");
+    
+    # Liest die Daten zu allen erlaubten Cocktails aus
+    read_itemdata();
+    
+    # Setzt die mininmale Anzahl der Anzeigen der Cocktails auf 1
+    $item{count}{min} = 1;
+    
+    # Ermittelt die maximale Anzahl der Anzeigen der Cocktails
+    if ($item{count}{query} < 20)
+       {
+        $item{count}{max} = $item{count}{query};
+       }
+    else
+       {
+        $item{count}{max} = 20;
+       }
+    
+    # Zeigt alle erlaubten Cocktails an
+    display_items();
+   }
+
+
+# Funktion liest alle erlaubten Kategorien bzw. alle erlaubten Cocktails auf
+sub read_itemdata
+   {
+    #Stellt eine Verbindung zur Datenbank her
+    my $conid = DBI->connect("DBI:mysql:mixer:$dbhost","","");
+    
+    # Deklariert die Variable als privat
+    my $query;
+    
+    # Erzeugt eine temporäre Tabellen
+    $conid -> do("CREATE TEMPORARY TABLE tmp_selection (cocktail_id smallint(5) unsigned NOT NULL PRIMARY KEY, cocktail_name varchar(30) NOT NULL UNIQUE, category_id smallint(5) unsigned NOT NULL, cocktail_mixable ENUM('true', 'false') DEFAULT 'false' NOT NULL, cocktail_allowed ENUM('true','false') DEFAULT 'false' NOT NULL, cocktail_payable ENUM('true', 'false') DEFAULT 'false' NOT NULL);");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage aller in der Datenbank vorhanden Cocktails
+    my $query_h1 = $conid -> prepare("SELECT cocktail_id, cocktail_name, category_id FROM cocktails;");
+    
+    # Führt die erzeugte SELECT-Anweisung zur Abfrage aller in der Datenbank vorhanden Cocktails aus
+    $query_h1 -> execute();
+    
+    # Liest alle in der Datenbank vorhandenen Cocktails aus
+    while (my $row_h1 = $query_h1 -> fetchrow_hashref())
+	  {
+	   # Erzeugt eine SELECT-Anweisung zur Abfrage ob der angegebene Cocktail mixbar ist
+	   my $query_h2 = $conid -> prepare("SELECT IF(COUNT(*) = 0,'true','false') AS cocktail_mixable FROM cocktails LEFT JOIN recipes ON cocktails.cocktail_id = recipes.cocktail_id LEFT JOIN tanks ON recipes.liquid_id = tanks.liquid_id WHERE cocktails.cocktail_id = '$row_h1->{cocktail_id}' AND ((tanks.tank_id IS NULL OR tanks.liquid_id IS NULL OR tanks.tank_volume IS NULL) OR tanks.tank_volume < recipes.liquid_amount) LIMIT 1;");
+	    
+	   # Erzeugt eine SELECT-Anweisung zur Abfrage ob der angegebene Cocktail vom Mindesalter her erlaubt ist
+	   my $query_h3 = $conid -> prepare("SELECT IF(IFNULL(max(liquids.liquid_minage),'0') > $age,'false','true') AS cocktail_allowed FROM cocktails LEFT JOIN recipes ON cocktails.cocktail_id = recipes.cocktail_id LEFT JOIN liquids ON recipes.liquid_id = liquids.liquid_id WHERE cocktails.cocktail_id = '$row_h1->{cocktail_id}' GROUP BY cocktails.cocktail_id LIMIT 1;");
+	   
+	   # Erzeugt eine SELECT-Anweisung zur Abfrage ob der angegebene Cocktail bezahlbar ist
+	   my $query_h4 = $conid -> prepare("SELECT IF(cocktail_price > $assets,'false','true') AS cocktail_payable FROM cocktails WHERE cocktail_id = '$row_h1->{cocktail_id}';");
+	    
+	   # Führt die erzeugte SELECT-Anweisung zur Abfrage ob der angegebene Cocktail mixbar ist aus
+	   $query_h2 -> execute();
+	    
+	   # Führt die erzeugte SELECT-Anweisung zur Abfrage ob der angegebene Cocktail vom Mindesalter her erlaubt ist aus
+	   $query_h3 -> execute();
+	    
+	   # Führt die erzeugte SELECT-Anweisung zur Abfrage ob der angegebene Cocktail bezahlbar ist aus
+	   $query_h4 -> execute();
+	    
+	   # Liest aus, ob der angegebene Cocktail mixbar ist
+	   my $row_h2 = $query_h2 -> fetchrow_hashref();
+	    
+	   # Liest aus, ob der angegebene Cocktail vom Mindesalter her erlaubt ist
+	   my $row_h3 = $query_h3 -> fetchrow_hashref();
+	    
+	   # Liest aus, ob der angegebene Cocktail bezahlbar ist
+	   my $row_h4 = $query_h4 -> fetchrow_hashref();
+	    
+	   # Sendet eine INSERT-Anweisung an die Datenbank, eine temporäre Tabelle mit allen benötigten Cocktaileigenschaften zu füllen
+	   $conid -> do("INSERT INTO tmp_selection (cocktail_id, cocktail_name, category_id, cocktail_mixable, cocktail_allowed, cocktail_payable) VALUES ('$row_h1->{cocktail_id}','$row_h1->{cocktail_name}','$row_h1->{category_id}','$row_h2->{cocktail_mixable}','$row_h3->{cocktail_allowed}','$row_h4->{cocktail_payable}');");
+	    
+	   # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage ob der angegebene Cocktail mixbar wieder frei
+	   $query_h2 -> finish();
+	    
+	   # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage ob der angegebene Cocktail vom Mindesalter her erlaubt ist wieder frei
+	   $query_h3 -> finish();
+	    
+	   # Gibt den Speicherplatz der SELECT-Anweisung zur Abfrage ob der angegebene Cocktail bezahlbar ist wieder frei
+	   $query_h4 -> finish();
+          }
+	
+    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage aller in der Datenbank vorhanden Cocktails wieder frei
+    $query_h1 -> finish();
+    
+    # Fall tritt ein, wenn alle erlaubten Kategorien angezeigt werden sollen
+    if ($mode eq "category")
+       {
+        # Erzeugt eine SELECT-Anweisung zur Abfrage aller erlaubten Kategorien
+	$query = $conid -> prepare("SELECT tmp_selection.category_id AS id, categories.category_name AS name FROM tmp_selection INNER JOIN categories ON tmp_selection.category_id = categories.category_id WHERE tmp_selection.cocktail_mixable = 'true' AND tmp_selection.cocktail_allowed = 'true' AND tmp_selection.cocktail_payable = 'true' GROUP BY tmp_selection.category_id ORDER BY categories.category_name ASC;");
+       }
+    
+    # Fall tritt ein, wenn alle erlaubten Cocktails angezeigt werden sollen   
+    if ($mode eq "cocktail")
+       {
+        # Erzeugt eine SELECT-Anweisung zur Abfrage aller erlaubten Cocktails
+	$query = $conid -> prepare("SELECT cocktail_id AS id, cocktail_name AS name FROM tmp_selection WHERE cocktail_mixable = 'true' AND cocktail_allowed = 'true' AND cocktail_payable = 'true' AND category_id = '$category{selected}' ORDER BY cocktail_name ASC;");
+       }
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage aller erlaubten Kategorien bzw. Cocktails aus
+    $query -> execute();
+    
+    # Setzt den Startwert für die 'index'-variable 
+    my $index = 0;
+    
+    # Liest alle erlaubten Kategorien bzw. Cocktails aus
+    while (my $row = $query -> fetchrow_hashref())
+       {
+        # Erhöht die 'index'-Variable um 1
+	$index++;
+	
+	# Liest die ID aus und schreibt sie in die passende Hashvariable
+	$item{id}{$index} = $row->{id};
+	
+	# Liest den Namen aus und schreibt ihn in die passende Hashvariable
+	$item{name}{$index} = $row->{name};
+       }
+    
+    # Schreibt die Anzahl der Datensätze in die entsprechende Variable
+    $item{count}{query} = $index;
+    
+    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage aller erlaubten Kategorien bzw. Cocktails wieder frei
+    $query -> finish();
+       
+    # Schließt die Verbindung zur Datenbank
+    $conid -> disconnect();
+   }
+
+
+# Funktion zeigt alle erlaubten Kategorien bzw. alle erlaubten Cocktails an
+sub display_items
+   {
+    # Setzt den Anfangswert für die 'x'-Variable und die 'y'-Variable
+    my $x = 10;
+    my $y = 10;
+    
+    # Erstellt die Anzeigelabels für die jeweilige Kategorie bzw. den jeweiligen Cocktail
+    for (my $i = $item{count}{min}; $i <= $item{count}{max}; $i++)
+        {
+	 if ($mode eq "category")
+	    {
+	     $item{label}{$i} = $category{frame}->Label(-background => $color{item}, -foreground => "#FFFFFF", -text => $item{name}{$i}) -> place(-x => $x, -y => $y, -width => 180);
+	    }
+	    
+	 if ($mode eq "cocktail")
+	    {
+	     $item{label}{$i} = $cocktail{frame}->Label(-background => $color{item}, -foreground => "#FFFFFF", -text => $item{name}{$i}) -> place(-x => $x, -y => $y, -width => 180);
+	    }
+	 
+	 # Selektiert das erste Anzeigefeld
+	 if ($i eq $item{count}{min})
+	    {
+	     $item{label}{$i} -> configure(-background => $color{selected});
+	     $item{label}{selected} = $i;
+	    }
+	    
+	 # Addiert auf den aktuellen 'x'-Wert 200 pixel  
+         $x = $x + 200;
+	 
+	 # Fängt eine neue Reihe mit Kategorien an, wenn die maximale Anzahl von Kategorien in einer Reihe erreicht ist
+	if (($i % 2) eq 0)
+	   {
+	    $x = 10;
+	    $y = $y + 40;
+	   }
+	}
+
+    # Zeigt Zusatzinformationen zur selektierten Kategorie bzw. des selektierten Cocktails an
+    display_infos();
+   }
+
+
+# Funktion erstellte eine neue Transaktion mit der Cocktailwahl des Benutzers und stellt die Transaktions-ID zur Verfügung
+sub new_transaction
+   {
+    # Stellt eine Verbindung zur Datenbank her
+    my $conid = DBI->connect("DBI:mysql:mixer:$dbhost",$dbuser,$dbpassword);
+    
+    # Sendet eine INSERT-Anweisung an die Datenbank um eine neue Transaktion mit der Cocktailwahl des Benutzers einzutragen
+    $conid -> do("INSERT INTO transactions (cocktail_id) VALUES ('$cocktail{selected}');");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der Transaktions-ID der gerade eingetragenen Transaktion
+    my $query = $conid -> prepare("SELECT LAST_INSERT_ID() AS transaction;");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage der Transaktions-ID der gerade eingetragenen Transaktion
+    $query -> execute();
+    
+    # Liest die Transaktions-ID aus
+    my $row = $query -> fetchrow_hashref();
+    
+    # Schreibt die Transaktions-ID in die entsprechende Variable
+    $transaction = $row->{transaction};
+    
+    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage der Transaktions-ID der gerade eingetragenen Transaktion frei
+    $query -> finish();
+    
+    # Schließt die Verbindung zur Datenbank
+    $conid -> disconnect();
+   }
+
+
+# Funktion verfolgt die Transaktion des Benutzers
+sub track_transaction
+   {
+    # Erzeugt eine SELECT-Anweisung zur Abfrage des aktuellen Status der Transaktion des Benutzers
+    my $query = $contracker -> prepare("SELECT transaction_status FROM transactions WHERE transaction_id='$transaction';");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage des aktuellen Status der Transaktion des Benutzers
+    $query -> execute();
+    
+    # Liest den Status der Transaktion des Benutzers aus
+    my $row = $query -> fetchrow_hashref();
+    
+    # Wählt den passenden Bildschirm für den Status der Transaktion des Benutzers
+    switch :
+       {
+        # Fall tritt ein, wenn der Status der Transaktion des Benutzers auf 'open' ist (Transaktion wird noch nicht bearbeitet)
+        if ($row->{transaction_status} eq "open")
+	   {
+	    # Zeigt dem Benutzer an, dass er warten muss
+	    $infodisplay->configure(-text => get_message(5,$language{selected}));
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des aktuellen Status der Transaktion des Benutzers frei
+	    $query -> finish();
+
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+       
+        # Fall tritt ein, wenn der Status der Transkation des Benutzers auf 'wait' ist (Steuerung wartet auf Becher unter Ausguß)
+        if ($row->{transaction_status} eq "wait")
+	   {
+	    # Zeigt dem Benutzer an, dass er einen Becher unter den Ausguss stellen soll
+	    $infodisplay->configure(-text => get_message(6,$language{selected}));
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des aktuellen Status der Transaktion des Benutzers frei
+	    $query -> finish();
+    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+	
+	# Fall tritt ein, wenn der Status der Transaktion des Benutzers auf 'mix' ist (Cocktail wird gemixt)
+	if ($row->{transaction_status} eq "mix")
+           {
+	    # Zeigt dem Benutzer an, dass sein Cocktail gemixt wird
+	    $infodisplay->configure(-text => get_message(7,$language{selected}));
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des aktuellen Status der Transaktion des Benutzers frei
+	    $query -> finish();
+    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+	
+	# Fall tritt ein, wenn der Status der Transaktion des Benutzers auf 'finished' ist (Cocktail ist fertig gemixt)   
+	if ($row->{transaction_status} eq "finished")
+           {
+	    # Zeigt dem Benutzer an, dass sein Cocktail fertig ist
+	    $infodisplay->configure(-text => get_message(8,$language{selected}));
+	    
+	    # Zieht den Preis des Cocktails vom Konto des Benutzers ab
+	    pay_cocktail();
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des aktuellen Status der Transaktion des Benutzers frei
+	    $query -> finish();
+	    
+	    # Schließt die Verbindung zur Datenbank
+	    $contracker -> disconnect();
+	    
+	    # Erzeugt den Frame zur Anzeige des Startbildschirms
+	    $final{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+	    
+	    # Erstellt einen neuen Timer
+	    $final{timer} = $final{frame}->repeat(100,sub{check_final();});
+    
+	    # Löscht die Transaktionsvariable
+	    $transaction = "";
+
+	    # Zerstört den Frame zur Auswahl des Cocktails
+	    $transtracker{frame}->destroy();
+	    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+	
+	# Fall tritt ein, wenn der Status der Transaktion des Benutzers auf 'abort' ist (Transaktion wurde abgebrochen)   
+	if ($row->{transaction_status} eq "abort")
+           {
+	    # Zeigt dem Benutzer an, dass sein Auftrag abgebrochen wurde
+	    $infodisplay->configure(-text => get_message(9,$language{selected}));
+	    
+	    # Gibt den Speicherplatz der SELECT-Anweisungen zur Abfrage des aktuellen Status der Transaktion des Benutzers frei
+	    $query -> finish();
+	    
+	    # Schließt die Verbindung zur Datenbank
+	    $contracker -> disconnect();
+	    
+	    # Erzeugt den Frame zur Anzeige des Startbildschirms
+	    $final{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+	    
+	    # Erstellt einen neuen Timer
+	    $final{timer} = $final{frame}->repeat(100,sub{check_final();});
+    
+	    # Löscht die Transaktionsvariable
+	    $transaction = "";
+	    
+	    # Zerstört den Frame zur Auswahl des Cocktails
+	    $transtracker{frame}->destroy();
+    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+       }
+   }
+   
+
+# Funktion speichert die entweder die ausgewählte Sprache oder die ausgewählte Kategorie oder den ausgewälten Cocktail
+sub save_selection
+   {
+    # Wählt dem Modus entsprechend die richtige Aktion aus
+    switch :
+       {
+        # Fall tritt ein, wenn die Sprachauswahl gespeichert werden soll
+        if ($mode eq "language")
+	   {
+	    # Schreibt die zu speichernde Sprach in die passende Variable
+	    $language{selected} = $item{id}{$item{label}{selected}};
+	    
+	    # Löscht den Inhalt der Hasvariablen mit den IDs und den Namen
+	    delete $item{id};
+	    delete $item{name};
+	    
+	    # Löscht den Inhalt der Zählerhasvariablen
+	    delete $item{count};
+	    
+	    # Erstellt die Auswahl der Kategorien
+	    create_categoryselection();
+	    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+	
+	# Fall tritt ein, wenn die Kategorieauswahl gespeichert werden soll 
+	if ($mode eq "category")
+	   {
+	    # Schreibt die zu speichernde Kategorie in die passende Variable
+	    $category{selected} = $item{id}{$item{label}{selected}};
+	    
+	    # Löscht den Inhalt der Hasvariablen mit den IDs und den Namen
+	    delete $item{id};
+	    delete $item{name};
+	    
+	    # Löscht den Inhalt der Zählerhasvariablen
+	    delete $item{count};
+	    
+	    # Erstellt die Auswahl der Cocktails
+	    create_cocktailselection();
+	    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+	
+	# Fall tritt ein, wenn die Cocktailauswahl gespeichert werden soll   
+	if ($mode eq "cocktail")
+	   {
+	    # Schreibt den zu speicherbden Cocktail in die passende Variable
+	    $cocktail{selected} = $item{id}{$item{label}{selected}};
+	    
+	    # Erstellt eine neue Transaktion mit dem Cocktailwunsch des Benutzers
+	    new_transaction();
+	    
+	    # Zerstört den Frame zur Auswahl des Cocktails
+	    $cocktail{frame}->destroy();
+	    
+	    # Löscht den Inhalt der Hasvariablen mit den IDs und den Namen
+	    delete $item{id};
+	    delete $item{name};
+	    
+	    # Löscht den Inhalt der Zählerhasvariablen
+	    delete $item{count};
+	    
+	    # Leert den Inhalt der Modusvariable
+	    $mode = "";
+	    
+	    # Leert den Inhalt der Kategorieauswahl und der Cocktailauswahl
+	    $category{selected} = "";
+	    
+	    # Erzeugt den Frame zur Anzeige des Startbildschirms
+	    $transtracker{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+	    
+	    # Stellt eine Verbindung zur Datenbank her
+	    $contracker = DBI->connect("DBI:mysql:mixer:$dbhost",$dbuser,$dbpassword);
+
+	    # Erzeugt einen Timer, der die vom Benutzer erstellte Transaktion verfolgt
+	    $transtracker{timer} = $transtracker{frame}->repeat(100,sub{track_transaction();});
+	    
+	    # Beendet den Durchlauf der Switch-Anweisung
+	    last switch;
+	   }
+       }    
+   }
+
+
+# Funktion zieht den Preis des Cocktails vom Konto des Benutzers ab
+sub pay_cocktail
+   {
+    # Stellt eine Verbindung zur Datenbank her
+    my $conid = DBI->connect("DBI:mysql:commerce:$dbhost",$dbuser,$dbpassword);
+    
+    # Sendet eine INSERT-Anweisung an die Datenbank um dem Benutzer den Betrag von dem Cocktail abzuziehen
+    $conid -> do("INSERT INTO transactions (transaction_description, transaction_amount, user_id) SELECT cocktail_name AS transaction_description,  (cocktail_price * -1) AS transaction_amount, '$user' AS user_id FROM mixer.cocktails WHERE cocktail_id ='$cocktail{selected}';");
+    
+    # Schließt die Verbindung zur Datenbank
+    $conid -> disconnect();
+   }
+
+
+# Funktion erzeugt das grafische Bedienelement
+sub create_frontend
+   {
+    # Erzeugt ein neues Hauptfenster
+    $frontend = new MainWindow(-background => "#FFFFFF", -height => 480, -width => 640);
+        
+    #Bindet die Tasten der Barmaschine an die entsprechenden Funktionen
+    $frontend->bind("<Up>", sub {select_items("up");});
+    $frontend->bind("<Left>", sub {select_items("left");});
+    $frontend->bind("<Right>", sub {select_items("right");});
+    $frontend->bind("<Down>", sub {select_items("down");});
+    $frontend->bind("<Return>", sub{save_selection();});
+    
+    # Erzeugt ein Label zur Anzeige von Informationen an den Benutzer
+    $infodisplay = $frontend->Label(-background => $color{background}, -foreground => "#000000", -text => get_message(1,"german")) -> place(-height => 20, -x => 50, -y => 445, -width => 540);
+    
+    # Erzeugt den Frame zur Anzeige des Startbildschirms
+    $chipcard{frame} = $frontend->Frame(-relief => "flat", -background => $color{background}, -height => 410, -width => 540) -> place(-x => 50,-y => 10);
+    
+    # Erstellt einen neuen Timer
+    $chipcard{timer} = $chipcard{frame}->repeat(1000,sub{check_chipcard();});
+   }
+
+
+# Erstellt die Grafische Oberfläche   
+create_frontend();
+
+# Hält die Ereignisschleife aufrecht
+MainLoop;

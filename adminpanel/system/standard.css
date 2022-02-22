@@ -1,0 +1,123 @@
+a.mainmenu		{
+			 color:#31309C;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:normal;
+			 text-decoration:none;
+			}
+
+a.sitemenu		{
+			 color:#0000FF;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:bold;
+			 text-decoration:none;
+			}
+
+body.menu		{
+			 background-color:#D5DEE6;
+			}
+
+body.standard		{
+			 background-color:#F6F6F6;
+			} 
+
+img.action		{
+			 border-width:0px;
+			}
+
+img.button		{
+			 border-width:0px;
+			}
+
+input.standard		{
+			 background-color:#FFFFFF;
+			 border-color:#000000;
+			 border-style:solid;
+			 border-width:1px;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:normal;
+			 text-decoration:none;
+			}
+
+select.standard		{
+			 background-color:#FFFFFF;
+			 border-color:#000000;
+			 border-style:solid;
+			 border-width:1px;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:normal;
+			 text-decoration:none;
+			}
+
+td.action		{
+			 text-align:center;
+			 width:25px;
+			}
+
+td.head			{
+			 background-color:#D5DEE6;
+			 color:#000000;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:bold;
+			 padding-top:2px;
+			 padding-bottom:2px;
+			 text-align:center;
+			 text-decoration:none;
+			}
+
+td.menutopic		{
+			 background-color:#D5DEE6;
+			 color:#000000;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:10pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:bold;
+			 text-decoration:none;
+			}
+
+td.sitemenu		{
+			 background-color:#E6E6E6;
+			 border:1px solid #9C999C;
+			 text-align:center;
+			 width:150px;
+			}
+
+td.standard		{
+			 color:#000000;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:normal;
+			 text-decoration:none;
+			}
+
+textarea.standard	{
+			 background-color:#FFFFFF;
+			 border-color:#000000;
+			 border-style:solid;
+			 border-width:1px;
+			 font-family:Arial,Helvetica,Verdana;
+			 font-size:9pt;
+			 font-style:normal;
+			 font-variant:normal;
+			 font-weight:normal;
+			 height:200px;
+			 text-decoration:none;
+			 width:300px;
+			{
