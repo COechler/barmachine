@@ -1,0 +1,285 @@
+#!/usr/bin/perl
+
+# Autor: Christian Oechler
+# Erstellungsdatum: 01.01.2005
+# Änderungsdatum: 16.04.2005
+# Version 0.0.1
+# Copyright: 2005 Christian Oechler
+# Lizenz: GPL Version 2
+
+# Bindet das benötigte Perlmodul für den Datenbankzugriff ein
+use DBI;
+
+# Bindet das benötigte Perlmodul für den Zugriff auf den Parallelport ein
+use Device::ParallelPort;
+
+# Funktion erzeugt einen Eintrag in der Logdatei
+sub log_message
+   {
+    # Öffnet die Logdatei zum anhängenden Schreiben
+    open(LOGFILE,">>/var/log/controld.log");
+    
+    # Schreibt den angegebenen String inklusive Zeitstempel in die Logdatei
+    print LOGFILE "[".localtime(time())."]\t".$_[0]."\n";
+    
+    # Schließt die Logdatei
+    close(LOGFILE);
+   }
+
+
+# Funktion ermittelt die ID des nächsten Transaktionsauftrags
+sub get_transaction
+   {
+    # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+    my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der ID der nächsten Transaktion
+    my $query = $con -> prepare("SELECT transaction_id FROM transactions WHERE transaction_status='open' LIMIT 1");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage der ID der nächsten Transaktion aus
+    $query -> execute();
+    
+    # Liest die ID der nächsten Transaktion aus der Datenbank aus
+    my $row = $query -> fetchrow_hashref();
+    
+    # Speichert die ID der nächsten Transaktion in der Variable 'transaction'
+    $transaction = $row -> {'transaction_id'};
+    
+    # Gibt den Speicherplatz der SELECT-Anweisung wieder frei
+    $query -> finish();
+    
+    # Schließt die Verbindung zum Datenbankserver
+    $con -> disconnect();
+   }
+   
+
+# Funktion setzt die aktuelle Transaktion auf den angegeben Status
+sub set_transactionstatus
+   {
+    # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+    my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+    
+    # Sendet eine Update-Anweisung an die Datenbank um den Status der Transaktion auf den angegebenen Status zu setzten
+    $con -> do("UPDATE transactions SET transaction_status = '$_[0]' WHERE transaction_id = '$transaction'");
+    
+    # Schließt die Verbindung zum Datenbankserver
+    $con -> disconnect();
+   }
+   
+
+# Funktion überprüft, ob die benötigten Flüssigkeiten in den Tanks vorhanden sind und ob genügend Flüssigkeit in den Tanks ist
+sub check_enoughliquid
+   {
+    # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+    my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der Anzahl der Flüssigkeiten, welche in im Tank nicht oder zu wenig vorhanden sind aus
+    my $query = $con -> prepare("SELECT COUNT(*) AS liquid_count FROM transactions LEFT JOIN recipes ON transactions.cocktail_id = recipes.cocktail_id LEFT JOIN tanks ON recipes.liquid_id = tanks.liquid_id WHERE transactions.transaction_id = '$transaction' AND ((tanks.tank_id IS NULL OR tanks.liquid_id IS NULL OR tanks.tank_volume IS NULL) OR tanks.tank_volume < recipes.liquid_amount)");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage der Anzahl der Flüssigkeiten, welche in im Tank nicht oder zu wenig vorhanden sind aus
+    $query -> execute();
+    
+    # Liest die Anzahl der Flüssigkeiten aus, die nicht im Tank vorhanden sind oder die nicht genügend im Tank vorhanden sind
+    my $row = $query -> fetchrow_hashref();
+    
+    # Liest die Anzahl der Flüssigkeiten aus, die nicht im Tank vorhanden sind oder die nigcht genügend im Tank vorhanden sind
+    #my $count = ;
+    
+    # Überprüft, ob die Anzahl der Flüssigkeiten, die nicht im Tank vorhanden sind oder die nigcht genügend im Tank vorhanden sind größer 0 ist
+    if ($row -> {'liquid_count'} gt 0)
+       {
+        # Gibt 'false' zurück
+	return false;
+       }
+    else
+       {
+        # Gibt 'true' zurück
+        return true;
+       }
+    
+    # Gibt den Speicherplatz der SELECT-Anweisung wieder frei
+    $query -> finish();
+    
+    # Schließt die Verbindung zum Datenbankserver
+    $con -> disconnect();
+   }
+   
+
+# Funktion ermittelt die niedrigste Priorität bei den Flüssigkeiten der angegebenen Transaktion
+sub calculate_minpriority()
+   {
+    # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+    my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der minimalen Priorität bei den Flüssiigkeiten der angegebenen Transaktion
+    my $query = $con -> prepare("SELECT MIN(liquid_priority) AS minpriority FROM transactions INNER JOIN recipes ON transactions.cocktail_id = recipes.cocktail_id WHERE transactions.transaction_id = '$transaction'");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage der minimalen Priorität bei den Flüssigkeiten der angegeben Transaktion
+    $query -> execute();
+    
+    # Liest die minimalste Priorität bei den Flüssigkeiten der angegebenen Transaktion aus
+    my $row = $query -> fetchrow_hashref();
+    
+    # Gibt die minimalste Priorität bei den Flüssigkeiten der angegebenen Transaktion
+    return $row -> {'minpriority'};
+    
+    # Gibt den Speicherplatz der SELECT-Anweisung wieder frei
+    $query -> finish();
+    
+    # Schließt die Verbindung zum Datenbankserver
+    $con -> disconnect();
+   }
+
+
+# Funktion ermittelt die höchste Priorität bei den Flüssigkeiten der angegebenenen Transaktion
+sub calculate_maxpriority()
+   {
+    # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+    my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+    
+    # Erzeugt eine SELECT-Anweisung zur Abfrage der maximalen Priorität bei den Flüssiigkeiten der angegebenen Transaktion
+    my $query = $con -> prepare("SELECT MAX(liquid_priority) AS maxpriority FROM transactions INNER JOIN recipes ON transactions.cocktail_id = recipes.cocktail_id WHERE transactions.transaction_id = '$transaction'");
+    
+    # Führt die erzeuge SELECT-Anweisung zur Abfrage der maximalen Priorität bei den Flüssigkeiten der angegeben Transaktion
+    $query -> execute();
+    
+    # Liest die maximalste Priorität bei den Flüssigkeiten der angegebeneb Transaktion aus
+    my $row = $query -> fetchrow_hashref();
+    
+     # Gibt die minimalste Priorität bei den Flüssigkeiten der angegebenen Transaktion
+    return $row -> {'maxpriority'};
+    
+    # Gibt den Speicherplatz der SELECT-Anweisung wieder frei
+    $query -> finish();
+    
+    # Schließt die Verbindung zum Datenbankserver
+    $con -> disconnect();
+   }
+
+# Schreibt in die Logdatei, dass das Programm gestartet worden ist
+log_message("Pumpensteuerung gestartet");
+   
+# Setzt den Anfangswert der 'run'-Variable auf 'true'
+$run = true;
+
+# Leert die Transaktionsvariable
+$transaction = "";
+
+my $port = Device::ParallelPort->new();
+
+# Programmendlosschleife: Stoppt wenn die 'run'-Variable 'false' ist
+while ($run eq true)
+   {
+    # Überprüft, ob kein Becher unter dem Ausschank steht
+    if ($port->get_bit(14) eq 0)
+       {
+        # Ermittelt die ID des nächsten Transaktion
+	get_transaction();
+		
+	# Überprüft, ob ein Transaktion vorliegt
+	if (not $transaction eq "")
+	   {
+	    # Schreibt in die Logdatei, dass das die angegegeben Transaktion zur Bearbeitung gestartet wird
+	    log_message("Die Bearbeitung der Transaktion mit der ID $transaction wird gestartet");
+		
+	    # Überprüft, ob die benötigten Flüssigkeiten in den Tanks vorhanden sind und ob genügend Flüssigkeit in den Tank ist
+	    if (check_enoughliquid() eq true)
+	       {
+	        # Setz die aktuelle Transaktion auf 'wait'
+		set_transactionstatus("wait");
+		
+		# Schreibt in die Logdatei, dass die angegebene Transaktion auf 'wait' gesetzt worden ist
+		log_message("Der Status der Transaktion mit der ID $transaction wurde auf 'wait' gesetzt");
+		
+	        while ($port->get_bit(14) eq 0)
+		   {
+		    #Verzögert die weitere Ausführung des Programms um eine Sekunde
+		    sleep 1;
+		   }
+		
+		# Wartet 2 Sekunden, um den Benutzer nicht zu erschrecken
+		sleep 2;
+		
+		# Setz die aktuelle Transaktion auf 'mix'
+		set_transactionstatus("mix");
+		
+		# Schreibt in die Logdatei, dass die angegebene Transaktion auf 'mix' gesetzt worden ist
+		log_message("Der Status der Transaktion mit der ID $transaction wurde auf 'mix' gesetzt");
+		
+		# Schleife läuft alle Prioritäten zwischen der minimalen und der maximalen
+		for ($i = calculate_minpriority(); $i le calculate_maxpriority();$i++)
+		    {		        
+		     # Stellt eine Verbindung zum Datenbankserver her und wählt die richtige Datenbank aus
+		     my $con = DBI->connect("DBI:mysql:mixer:localhost","","");
+		     
+		     # Erzeugt eine SELECT-Anweisung zur Abfrage der benötigten Pumpeneinschaltzeiten bei der angegebenen Priorität
+		     my $query1 = $con -> prepare("SELECT tanks.tank_id AS pump, (ROUND((recipes.liquid_amount * liquids.liquid_viscosity * 50000),0) + IF(recipes.liquid_amount <= 30,500000,0)) AS pumptime, recipes.liquid_amount AS amount, liquids.liquid_name AS liquid FROM transactions INNER JOIN recipes ON transactions.cocktail_id = recipes.cocktail_id INNER JOIN liquids ON recipes.liquid_id = liquids.liquid_id INNER JOIN tanks ON tanks.liquid_id = recipes.liquid_id WHERE transactions.transaction_id = '$transaction' AND recipes.liquid_priority = '$i'");
+		     
+		     # Führt die erzeuge SELECT-Anweisung zur Abfrage der benötigten Pumpeneinschaltzeiten bei der angegebenen Priorität
+		     $query1 -> execute();
+		     
+		     # Liest die einzelne Pumpeneinschaltzeit aus der Datenbank aus
+		     while (my $row1 = $query1 -> fetchrow_hashref())
+		        {
+			 # Schreibt die Pumpennummer und die Pumzeit (in Millisekunden) in die richtige Variable
+			 my $pump = $row1 -> {'pump'};
+			 my $pumptime = $row1 -> {'pumptime'};
+			 my $amount = $row1 -> {'amount'};
+			 my $liquid = $row1 -> {'liquid'};
+			 
+			 # Startet das Pumpensteuerungsprogramm und übergibt die Pumpennummer und die Laufzeit
+			 system("./usr/bin/pumpd $pump $pumptime &");
+			 
+			 # Schreibt in die Logdatei, welche Flüssigkeit in welcher Menge eingefüllt worden ist
+			 log_message("Es wurden $amount ml von $liquid eingefüllt");
+			 
+			 # Sendet eine Update-Anweisung an die Datenbank um den Füllstand im Tank um die benötigte Menge herunter zu setzen
+			 $con -> do("UPDATE tanks SET tank_volume = tank_volume - $amount WHERE tank_id='$pump' LIMIT 1");
+			}
+		     
+		     # Erzeugt eine SELECT-Anweisung zur Abfrage der maximalen Pumpeneinschaltzeiten bei der angegebenen Priorität
+		     my $query2 = $con -> prepare("SELECT IFNULL(ROUND(MAX(recipes.liquid_amount * liquids.liquid_viscosity * 0.05) + IF(recipes.liquid_amount <= 30,0.5,0),0),0) + 1 AS maxpumptime FROM transactions INNER JOIN recipes ON transactions.cocktail_id = recipes.cocktail_id INNER JOIN liquids ON recipes.liquid_id = liquids.liquid_id WHERE transactions.transaction_id = '$transaction' AND recipes.liquid_priority = '$i'");
+		     
+		     # Führt die erzeuge SELECT-Anweisung zur Abfrage der maximalen Pumpeneinschaltzeiten bei der angegebenen Priorität
+		     $query2 -> execute();
+		     
+		     # Liest die maximale Pumpeinschaltzeit aus der Datenbank aus
+		     my $row2 = $query2 -> fetchrow_hashref();
+		     
+		     # Wartet, bis die maximale Pumpeinschaltzeit abgelaufen ist
+		     sleep $row2 -> {'maxpumptime'};
+		     
+		     # Gibt den Speicherplatz der SELECT-Anweisungen wieder frei
+		     $query1 -> finish();
+		     $query2 -> finish();
+     
+		     # Schließt die Verbindung zum Datenbankserver
+		     $con -> disconnect();
+		    }
+		    
+		# Setz die aktuelle Transaktion auf 'finished'
+		set_transactionstatus("finished");
+		
+		# Schreibt in die Logdatei, dass die angegebene Transaktion auf 'finished' gesetzt worden ist
+		log_message("Der Status der Transaktion mit der ID $transaction wurde auf 'finished' gesetzt");
+	       }
+	    else
+	       {
+	        # Setz die aktuelle Transaktion auf 'abort'
+		set_transactionstatus("abort");
+		
+		# Schreibt in die Logdatei, dass die angegebene Transaktion auf 'abort' gesetzt worden ist
+		log_message("Der Status der Transaktion mit der ID $transaction wurde auf 'abort' gesetzt");
+	       }
+	       
+	    # Schreibt in die Logdatei, dass die Bearbeitung angegebene Transaktion beendet worden ist
+	    log_message("Die Bearbeitung der Transaktion mit der ID $transaction ist beendet");
+	    
+	    # Leert die Transaktionsvariable
+	    $transaction = "";
+	   }
+       }
+       
+    # Verzögert die weitere Ausführung des Programms um eine Sekunde
+    sleep 1;
+   }
